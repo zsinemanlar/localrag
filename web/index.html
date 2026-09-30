@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Local RAG</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f5f8b'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h8' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  /* No web font on purpose: the app runs offline, so the heading font comes from the system. */
+  :root {
+    --bg: #f4f1ea; --bg2: #ebe7dd; --panel: #fffdf8; --ink: #1d1b17; --muted: #7b766b; --line: #ddd8cb;
+    --accent: #1f5f8b; --accent-ink: #ffffff; --accent-soft: #e3edf3; --ok: #2e7d5b;
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131312; --bg2: #1a1a18; --panel: #1c1c1a; --ink: #ece9e1; --muted: #9a968b; --line: #2d2c28;
+            --accent: #7cb8e0; --accent-ink: #0d1a24; --accent-soft: #1d2b36; --ok: #62c298; }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--sans); min-height: 100vh;
+         background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 22px 22px;
+         background-position: -11px -11px; }
+  .shell { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  /* ---------- header ---------- */
+  header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
+           backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 16px; padding-bottom: 16px; }
+  .brand { display: flex; align-items: center; }
+  .word { font-family: var(--display); font-size: 25px; letter-spacing: -0.015em; line-height: 1; font-weight: 600; }
+  .word em { font-style: normal; }
+  .tag { font-size: 12px; color: var(--muted); margin-top: 4px; letter-spacing: .01em; }
+  .status { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; font-size: 12px; color: var(--muted); }
+  .pill { border: 1px solid var(--line); border-radius: 99px; padding: 3px 11px; background: var(--panel); white-space: nowrap; }
+  .pill b { color: var(--ink); font-weight: 600; }
+  .pill.live { color: var(--ink); }
+  .pill.live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+                       margin-right: 7px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  @media (max-width: 760px) { .status .opt { display: none; } .tag { display: none; } }
+
+  /* ---------- empty state ---------- */
+  .hero { padding: 72px 0 40px; }
+  .hint { font: 700 11px var(--sans); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .card { text-align: left; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+          border-radius: 12px; padding: 15px 16px; cursor: pointer; transition: transform .15s, border-color .15s; }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card small { display: block; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .09em;
+                text-transform: uppercase; margin-bottom: 6px; }
+  body.chatting .hero { display: none; }
+
+  /* ---------- chat ---------- */
+  .layout { display: none; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 34px; padding: 34px 0 190px; }
+  body.chatting .layout { display: grid; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .turn { margin-bottom: 30px; animation: rise .3s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .q { font-family: var(--display); font-size: 21px; line-height: 1.3; letter-spacing: -0.01em; margin: 0 0 12px; font-weight: 600; }
+  .a { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+       padding: 16px 20px 16px 24px; white-space: pre-wrap; min-height: 56px; }
+  .a::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 3px; background: var(--accent); }
+  .a.wait { color: var(--muted); display: flex; align-items: center; gap: 10px; }
+  .dots i { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--accent);
+            animation: blink 1.1s infinite ease-in-out both; }
+  .dots i:nth-child(2) { animation-delay: .18s; } .dots i:nth-child(3) { animation-delay: .36s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .2; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+  .a.live::after { content: ""; display: inline-block; width: 7px; height: 1.05em; margin-left: 3px; vertical-align: -2px;
+                   background: var(--accent); animation: caret 1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .meta { font: 12px var(--mono); color: var(--muted); margin-top: 9px; }
+  .cite { display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; margin: 0 2px;
+          border-radius: 6px; background: var(--accent); color: var(--accent-ink); font: 700 11.5px var(--sans);
+          cursor: pointer; vertical-align: 1px; }
+  .cite:hover { filter: brightness(1.12); }
+
+  aside { position: sticky; top: 96px; align-self: start; max-height: calc(100vh - 260px); overflow: auto; padding-right: 4px; }
+  aside h2 { font: 700 11px var(--sans); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 0 12px; }
+  .src { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 15px; margin-bottom: 10px;
+         transition: border-color .15s, box-shadow .2s; }
+  .src.hot { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .src-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; cursor: pointer; font-size: 13px; }
+  .src-head .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; margin-right: 8px;
+                 background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 11.5px; }
+  .src-head .file { font-weight: 600; }
+  .src-head .sec { color: var(--muted); display: block; margin: 2px 0 0 28px; font-size: 12px; }
+  .src-head .sc { font: 12px var(--mono); color: var(--muted); }
+  .bar { height: 3px; background: var(--bg2); border-radius: 2px; margin: 10px 0 0; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .snip { color: var(--muted); font-size: 12.5px; margin-top: 9px; display: -webkit-box; -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+  .src.open .snip { display: block; -webkit-line-clamp: unset; overflow: visible; color: var(--ink); }
+  .empty { color: var(--muted); font-size: 13px; border: 1px dashed var(--line); border-radius: 12px; padding: 14px 16px; }
+
+  /* ---------- composer ---------- */
+  form { position: fixed; left: 0; right: 0; bottom: 0; padding: 30px 28px 24px;
+         background: linear-gradient(transparent, var(--bg) 42%); pointer-events: none; }
+  .composer { max-width: 1120px; margin: 0 auto; pointer-events: auto; }
+  .chips { display: none; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  body.chatting .chips { display: flex; }
+  .chip { font: 12px var(--sans); color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+          border-radius: 99px; padding: 4px 12px; cursor: pointer; }
+  .chip:hover { color: var(--ink); border-color: var(--accent); }
+  .field { display: flex; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 7px;
+           box-shadow: 0 8px 30px -14px rgba(0, 0, 0, .35); transition: border-color .15s; }
+  .field:focus-within { border-color: var(--accent); }
+  input { flex: 1; font: inherit; font-size: 16px; padding: 10px 12px; border: 0; background: transparent; color: var(--ink); outline: none; }
+  button.go { font: inherit; font-weight: 600; padding: 0 24px; border-radius: 10px; border: 0; background: var(--accent);
+              color: var(--accent-ink); cursor: pointer; transition: filter .15s; }
+  button.go:hover:not(:disabled) { filter: brightness(1.1); }
+  button.go:disabled { opacity: .45; cursor: default; }
+  .foot { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 10px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="shell head">
+    <div class="brand">
+      <div>
+        <div class="word">My <em>Local</em> RAG</div>
+        <div class="tag">Foundry Local ile çalışan doküman asistanı</div>
+      </div>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+</header>
+
+<div class="shell">
+  <section class="hero" id="hero">
+    <div class="hint">Örnek sorular</div>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <div class="layout">
+    <main id="log"></main>
+    <aside>
+      <h2>Kaynaklar</h2>
+      <div id="sources"><div class="empty">Cevabın dayandığı doküman parçaları burada görünür.</div></div>
+    </aside>
+  </div>
+</div>
+
+<form id="form">
+  <div class="composer">
+    <div class="chips" id="chips"></div>
+    <div class="field">
+      <input id="q" autocomplete="off" placeholder="Dokümanlara bir soru sor..." autofocus>
+      <button class="go" id="go">Sor</button>
+    </div>
+    <div class="foot">Sorular ve cevaplar bu bilgisayardan çıkmaz. Her cevabın dayandığı doküman parçası yanında görünür.</div>
+  </div>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const EXAMPLES = [
+  ["Mimari", "Foundry Local modelleri hangi runtime üzerinde çalıştırır?"],
+  ["Donanım", "Cihazda GPU yoksa ne olur?"],
+  ["Gizlilik", "Verilerim buluta gidiyor mu?"],
+  ["RAG", "Chunk'lar arasında overlap neden kullanılır?"],
+];
+
+fetch("/info").then((r) => r.json()).then((i) => {
+  const short = (id) => (id || "").replace(/-(cuda|generic|openvino|trtrtx)-(gpu|cpu):\d+$/i, "");
+  $("status").innerHTML =
+    `<span class="pill live">yerel · ağ isteği yok</span>` +
+    `<span class="pill"><b>${short(i.chat)}</b></span>` +
+    `<span class="pill opt"><b>${short(i.embedding)}</b></span>` +
+    `<span class="pill opt">${(i.provider || "").replace("ExecutionProvider", "")}</span>` +
+    `<span class="pill opt">${i.docs} doküman · ${i.chunks} chunk</span>`;
+}).catch(() => {});
+
+function ask(text) { $("q").value = text; $("form").requestSubmit(); }
+EXAMPLES.forEach(([tag, text]) => {
+  const c = document.createElement("button");
+  c.type = "button"; c.className = "card"; c.innerHTML = `<small>${tag}</small>${esc(text)}`;
+  c.onclick = () => ask(text);
+  $("cards").appendChild(c);
+  const s = document.createElement("span");
+  s.className = "chip"; s.textContent = text; s.onclick = () => ask(text);
+  $("chips").appendChild(s);
+});
+
+function renderAnswer(el, text) {
+  el.innerHTML = esc(text).replace(/\[(\d+)\]/g, '<span class="cite" data-n="$1">$1</span>');
+}
+
+function renderSources(items) {
+  const box = $("sources");
+  if (!items.length) { box.innerHTML = '<div class="empty">Yeterince benzer bir doküman parçası bulunamadı, bu yüzden model çağrılmadı.</div>'; return; }
+  box.innerHTML = items.map((s) => `
+    <div class="src" id="src-${s.n}">
+      <div class="src-head">
+        <span><span class="n">${s.n}</span><span class="file">${esc(s.file)}</span>${s.section ? `<span class="sec">${esc(s.section)}</span>` : ""}</span>
+        <span class="sc">${s.score.toFixed(2)}</span>
+      </div>
+      <div class="bar"><i style="width:${Math.round(s.score * 100)}%"></i></div>
+      <div class="snip">${esc(s.text)}</div>
+    </div>`).join("");
+  box.querySelectorAll(".src-head").forEach((h) => h.onclick = () => h.parentElement.classList.toggle("open"));
+}
+
+document.addEventListener("click", (e) => {
+  const c = e.target.closest(".cite");
+  if (!c) return;
+  const src = $("src-" + c.dataset.n);
+  if (!src) return;
+  src.classList.add("open", "hot");
+  src.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  setTimeout(() => src.classList.remove("hot"), 1500);
+});
+
+$("form").onsubmit = async (e) => {
+  e.preventDefault();
+  const question = $("q").value.trim();
+  if (!question || $("go").disabled) return;
+  $("q").value = ""; $("go").disabled = true;
+  document.body.classList.add("chatting");
+
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  turn.innerHTML = `<h3 class="q">${esc(question)}</h3>
+    <div class="a wait"><span class="dots"><i></i><i></i><i></i></span>Kaynaklar aranıyor</div><div class="meta"></div>`;
+  $("log").appendChild(turn);
+  const ans = turn.querySelector(".a"), meta = turn.querySelector(".meta");
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+
+  let text = "";
+  try {
+    const res = await fetch("/ask", { method: "POST", body: JSON.stringify({ question }) });
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const m = JSON.parse(line);
+        if (m.type === "sources") {
+          renderSources(m.items);
+          if (m.items.length) ans.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>Cevap yazılıyor';
+        } else if (m.type === "token") {
+          ans.classList.remove("wait"); ans.classList.add("live");
+          text += m.text; renderAnswer(ans, text);
+        } else if (m.type === "done") {
+          ans.classList.remove("wait", "live");
+          if (!text) { ans.classList.remove("wait"); }
+          if (m.first != null) meta.textContent = `ilk token ${m.first.toFixed(1)} sn · toplam ${m.total.toFixed(1)} sn`;
+        }
+      }
+    }
+  } catch (err) {
+    ans.classList.remove("wait", "live"); ans.textContent = "Bir hata oluştu: " + err;
+  }
+  ans.classList.remove("live");
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  $("go").disabled = false; $("q").focus();
+};
+</script>
+</body>
+</html>
